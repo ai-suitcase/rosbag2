@@ -45,9 +45,8 @@ TEST_F(RecordIntegrationTestFixture, published_messages_from_multiple_topics_are
 
   rosbag2_test_common::PublicationManager pub_manager;
   pub_manager.setup_publisher(array_topic, array_message, 2);
-  pub_manager.setup_publisher(string_topic, string_message, 2);
 
-  rosbag2_transport::RecordOptions record_options = {true, false, {}, "rmw_format", 100ms};
+  rosbag2_transport::RecordOptions record_options = {true, false, {}, "rmw_format", 20s};
   auto recorder = std::make_shared<rosbag2_transport::Recorder>(
     std::move(writer_), storage_options_, record_options);
   recorder->record();
@@ -55,6 +54,9 @@ TEST_F(RecordIntegrationTestFixture, published_messages_from_multiple_topics_are
   start_async_spin(recorder);
 
   ASSERT_TRUE(pub_manager.wait_for_matched(array_topic.c_str()));
+  // Let discovery settle; a long timeout distinguishes graph notification from polling.
+  std::this_thread::sleep_for(500ms);
+  pub_manager.setup_publisher(string_topic, string_message, 2);
   ASSERT_TRUE(pub_manager.wait_for_matched(string_topic.c_str()));
 
   pub_manager.run_publishers();
@@ -84,4 +86,17 @@ TEST_F(RecordIntegrationTestFixture, published_messages_from_multiple_topics_are
   EXPECT_THAT(string_messages[0]->string_value, Eq("Hello World"));
   EXPECT_THAT(array_messages[0]->bool_values, ElementsAre(true, false, true));
   EXPECT_THAT(array_messages[0]->float32_values, ElementsAre(40.0f, 2.0f, 0.0f));
+}
+
+TEST_F(RecordIntegrationTestFixture, stop_wakes_discovery_with_long_polling_interval)
+{
+  rosbag2_transport::RecordOptions record_options = {true, false, {}, "rmw_format", 20s};
+  auto recorder = std::make_shared<rosbag2_transport::Recorder>(
+    std::move(writer_), storage_options_, record_options);
+  recorder->record();
+  std::this_thread::sleep_for(500ms);
+
+  const auto start = std::chrono::steady_clock::now();
+  recorder->stop();
+  EXPECT_LT(std::chrono::steady_clock::now() - start, 1s);
 }

@@ -122,6 +122,13 @@ void Recorder::stop()
     return;  // We are not in recording and therefore shall not do stop operation.
   }
   stop_discovery_ = true;
+  try {
+    // Wake the graph wait promptly even with a long discovery polling interval.
+    get_node_graph_interface()->notify_graph_change();
+  } catch (const std::exception & e) {
+    RCLCPP_WARN_STREAM(
+      get_logger(), "Failed to notify graph change while stopping discovery: " << e.what());
+  }
   if (discovery_future_.valid()) {
     auto status = discovery_future_.wait_for(2 * record_options_.topic_polling_interval);
     if (status != std::future_status::ready) {
@@ -197,8 +204,12 @@ void Recorder::record()
     subscribe_topics(get_requested_or_available_topics());
   }
   if (!record_options_.is_discovery_disabled) {
-    discovery_future_ =
-      std::async(std::launch::async, std::bind(&Recorder::topics_discovery, this));
+    // Register before launching the thread so publishers created immediately after
+    // record() cannot fall between the initial scan and graph event registration.
+    // Capture the event instead of adding a member to preserve Humble's class layout.
+    auto graph_event = get_graph_event();
+    discovery_future_ = std::async(
+      std::launch::async, [this, graph_event]() {topics_discovery(graph_event);});
   }
 
   if (record_options_.start_paused) {
@@ -277,7 +288,7 @@ bool Recorder::is_paused()
   return paused_.load();
 }
 
-void Recorder::topics_discovery()
+void Recorder::topics_discovery(rclcpp::Event::SharedPtr graph_event)
 {
   // If using sim time - wait until /clock topic received before even creating subscriptions
   if (record_options_.use_sim_time) {
@@ -293,8 +304,14 @@ void Recorder::topics_discovery()
       RCLCPP_INFO(this->get_logger(), "Sim time /clock found, starting recording.");
     }
   }
+  bool should_update_subscriptions = true;
   while (rclcpp::ok() && stop_discovery_ == false) {
     try {
+      if (!should_update_subscriptions) {
+        wait_for_graph_change(graph_event, record_options_.topic_polling_interval);
+        should_update_subscriptions = graph_event->check_and_clear();
+        continue;
+      }
       auto topics_to_subscribe = get_requested_or_available_topics();
       for (const auto & topic_and_type : topics_to_subscribe) {
         warn_if_new_qos_for_subscribed_topic(topic_and_type.first);
@@ -310,12 +327,17 @@ void Recorder::topics_discovery()
           "All requested topics are subscribed. Stopping discovery...");
         return;
       }
+      wait_for_graph_change(graph_event, record_options_.topic_polling_interval);
+      should_update_subscriptions = graph_event->check_and_clear();
     } catch (const std::exception & e) {
       RCLCPP_ERROR_STREAM(get_logger(), "Failure in topics discovery.\nError: " << e.what());
+      should_update_subscriptions = true;
+      std::this_thread::sleep_for(record_options_.topic_polling_interval);
     } catch (...) {
       RCLCPP_ERROR_STREAM(get_logger(), "Failure in topics discovery.");
+      should_update_subscriptions = true;
+      std::this_thread::sleep_for(record_options_.topic_polling_interval);
     }
-    std::this_thread::sleep_for(record_options_.topic_polling_interval);
   }
 }
 

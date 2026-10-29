@@ -25,6 +25,7 @@
 
 #include "keyboard_handler/keyboard_handler.hpp"
 
+#include "rclcpp/event.hpp"
 #include "rclcpp/node.hpp"
 #include "rclcpp/qos.hpp"
 
@@ -127,7 +128,7 @@ protected:
   std::atomic<bool> stop_discovery_;
 
 private:
-  void topics_discovery();
+  void topics_discovery(rclcpp::Event::SharedPtr graph_event);
 
   std::unordered_map<std::string, std::string>
   get_missing_topics(const std::unordered_map<std::string, std::string> & all_topics);

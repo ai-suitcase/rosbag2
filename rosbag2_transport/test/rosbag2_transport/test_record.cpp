@@ -43,13 +43,15 @@ TEST_F(RecordIntegrationTestFixture, published_messages_from_multiple_topics_are
 
   rosbag2_test_common::PublicationManager pub_manager;
   pub_manager.setup_publisher(array_topic, array_message, 2);
-  pub_manager.setup_publisher(string_topic, string_message, 2);
 
   rosbag2_transport::RecordOptions record_options =
   {false, false, {string_topic, array_topic}, "rmw_format", 50ms};
   auto recorder = std::make_shared<rosbag2_transport::Recorder>(
     std::move(writer_), storage_options_, record_options);
   recorder->record();
+
+  // Match upstream #2201: a publisher may appear immediately after record().
+  pub_manager.setup_publisher(string_topic, string_message, 2);
 
   start_async_spin(recorder);
 
