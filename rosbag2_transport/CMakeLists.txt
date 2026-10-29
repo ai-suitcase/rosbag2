@@ -1,6 +1,12 @@
 cmake_minimum_required(VERSION 3.5)
 project(rosbag2_transport)
 
+# Match the optimized Humble binary package when building this source overlay.
+# Keep explicit developer/CI build type selections intact.
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
+endif()
+
 # Default to C99
 if(NOT CMAKE_C_STANDARD)
   set(CMAKE_C_STANDARD 99)
